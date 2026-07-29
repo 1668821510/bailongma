@@ -1,0 +1,31 @@
+name: Build Windows EXE
+on:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 拉取源码
+        uses: actions/checkout@v4
+
+      - name: 配置Node20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装项目依赖
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+        run: npm install
+
+      - name: 打包Windows安装包
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: 上传打包产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows安装包
+          path: dist/*.exe
