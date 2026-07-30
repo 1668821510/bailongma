@@ -11,7 +11,7 @@ import { getQuotaStatus } from './quota.js'
 import { isRunning, stopLoop, startLoop } from './control.js'
 import { buildHeartbeatSystemPromptPreview } from './system-prompt-preview.js'
 import { paths } from './paths.js'
-import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getVisionModelKey, setVisionModelKey, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, getProviderSummaries, getSecurity, setSecurity, getEmbeddingConfig, setEmbeddingConfig, EMBEDDING_PROVIDER_PRESETS, getWebSearchConfig, setWebSearchConfig } from './config.js'
+import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getVisionModelConfig, setVisionModelConfig, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, getProviderSummaries, getSecurity, setSecurity, getEmbeddingConfig, setEmbeddingConfig, EMBEDDING_PROVIDER_PRESETS, getWebSearchConfig, setWebSearchConfig } from './config.js'
 import { streamTTS, TTS_PROVIDERS, TTS_VOICES } from './voice/tts-providers.js'
 import { restartConnector } from './social/index.js'
 // manager.js (Whisper local server) removed
@@ -937,9 +937,7 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
         minimax: {
           configured: !!(globalThis.process?.env?.MINIMAX_API_KEY || minimaxKey),
         },
-        vision: {
-          configured: !!getVisionModelKey(),
-        },
+        vision: getVisionModelConfig(),
       })
       return
     }
@@ -1059,15 +1057,21 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       return
     }
 
-    // POST /settings/vision-model — set the vision model API key
+    // GET /settings/vision-model — read vision model configuration without exposing the API key
+    if (req.method === 'GET' && url.pathname === '/settings/vision-model') {
+      jsonResponse(res, 200, { ok: true, vision: getVisionModelConfig() })
+      return
+    }
+
+    // POST /settings/vision-model — save independent vision model credentials
     if (req.method === 'POST' && url.pathname === '/settings/vision-model') {
       const chunks = []
       req.on('data', chunk => chunks.push(chunk))
       req.on('end', () => {
         try {
           const body = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
-          const result = setVisionModelKey(body.apiKey)
-          jsonResponse(res, 200, { ok: true, ...result })
+          const vision = setVisionModelConfig(body)
+          jsonResponse(res, 200, { ok: true, vision })
         } catch (err) {
           jsonResponse(res, 400, { ok: false, error: err.message })
         }

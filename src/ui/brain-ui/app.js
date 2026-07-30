@@ -1943,6 +1943,8 @@ function initTTSSettings() {
   const saveMinimaxBtn  = document.getElementById("settings-save-minimax");
   const minimaxFeedback = document.getElementById("settings-minimax-feedback");
   const visionModelKeyInput = document.getElementById("settings-vision-model-key");
+  const visionModelBaseUrlInput = document.getElementById("settings-vision-model-baseurl");
+  const visionModelNameInput = document.getElementById("settings-vision-model-name");
   const saveVisionModelBtn  = document.getElementById("settings-save-vision-model");
   const visionModelFeedback = document.getElementById("settings-vision-model-feedback");
   const saveSocialBtn   = document.getElementById("settings-save-social");
@@ -1955,6 +1957,7 @@ function initTTSSettings() {
   if (!settingsBtn || !overlay) return;
 
   let cachedProviders = null;
+  let visionModelConfigured = false;
 
   overlay.querySelectorAll(".settings-nav-item").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -1977,11 +1980,13 @@ function initTTSSettings() {
     setTimeout(() => { el.textContent = ""; el.className = "settings-feedback"; }, 3000);
   }
 
-  function refreshConfigSummary({ llm, minimax }) {
+  function refreshConfigSummary({ llm, minimax, vision }) {
     const cfgLlm = document.getElementById("settings-cfg-llm");
     const cfgLlmDot = document.getElementById("settings-cfg-llm-dot");
     const cfgMedia = document.getElementById("settings-cfg-media");
     const cfgMediaDot = document.getElementById("settings-cfg-media-dot");
+    const cfgVision = document.getElementById("settings-cfg-vision");
+    const cfgVisionDot = document.getElementById("settings-cfg-vision-dot");
     if (cfgLlm) cfgLlm.textContent = `${llm.provider || "—"} · ${llm.model || "—"}`;
     if (cfgLlmDot) {
       cfgLlmDot.textContent = "●";
@@ -1992,6 +1997,13 @@ function initTTSSettings() {
     if (cfgMediaDot) {
       cfgMediaDot.textContent = "●";
       cfgMediaDot.className = `settings-config-dot ${minimax.configured ? "active" : "inactive"}`;
+    }
+    if (cfgVision) cfgVision.textContent = vision?.configured
+      ? `${vision.model || "—"} · ${vision.baseURL || "—"}`
+      : "未配置";
+    if (cfgVisionDot) {
+      cfgVisionDot.textContent = "●";
+      cfgVisionDot.className = `settings-config-dot ${vision?.configured ? "active" : "inactive"}`;
     }
   }
 
@@ -2034,9 +2046,14 @@ function initTTSSettings() {
   async function loadSettings() {
     try {
       const data = await fetch(`${API}/settings`).then(r => r.json());
-      const { llm, minimax, providers } = data;
+      const { llm, minimax, providers, vision } = data;
       if (providers) cachedProviders = providers;
-      refreshConfigSummary({ llm, minimax });
+      visionModelConfigured = Boolean(vision?.configured);
+      refreshConfigSummary({ llm, minimax, vision });
+      if (visionModelBaseUrlInput) {
+        visionModelBaseUrlInput.value = vision?.baseURL || "https://api.openai.com/v1";
+      }
+      if (visionModelNameInput) visionModelNameInput.value = vision?.model || "gpt-4o-mini";
       populateProviderSelect(providers, llm.provider || "auto");
       if (providerSelect && llm.provider) providerSelect.value = llm.provider;
       applyCustomProviderUI(llm);
@@ -2096,6 +2113,8 @@ function initTTSSettings() {
   async function loadWebSearchSettings() {
     try {
       const { webSearch } = await fetch(`${API}/settings/web-search`).then(r => r.json());
+      const kimiNativeEl = document.getElementById("websearch-kimi-native");
+      if (kimiNativeEl) kimiNativeEl.checked = Boolean(webSearch?.kimiNativeSearchEnabled);
       const urlEl = document.getElementById("websearch-searxng-url");
       if (urlEl) urlEl.value = webSearch?.searxngUrl || "";
       const setStatus = (id, configured, fromEnv, extra) => {
@@ -2124,6 +2143,7 @@ function initTTSSettings() {
   if (saveWebSearchBtn) {
     saveWebSearchBtn.addEventListener("click", async () => {
       const updates = {};
+      const kimiNativeEl = document.getElementById("websearch-kimi-native");
       const serperEl  = document.getElementById("websearch-serper-key");
       const braveEl   = document.getElementById("websearch-brave-key");
       const tavilyEl  = document.getElementById("websearch-tavily-key");
@@ -2138,6 +2158,7 @@ function initTTSSettings() {
       if (braveVal)   updates.braveKey   = braveVal;
       if (tavilyVal)  updates.tavilyKey  = tavilyVal;
       if (jinaVal)    updates.jinaKey    = jinaVal;
+      updates.kimiNativeSearchEnabled = Boolean(kimiNativeEl?.checked);
       // SearXNG URL：空字符串也要传，让用户能清掉
       if (searxngEl)  updates.searxngUrl = searxngVal || "";
       saveWebSearchBtn.disabled = true;
@@ -2577,17 +2598,23 @@ function initTTSSettings() {
 
   saveVisionModelBtn?.addEventListener("click", async () => {
     const apiKey = visionModelKeyInput?.value?.trim() || "";
-    if (!apiKey) { showFeedback(visionModelFeedback, "Key 不能为空", true); return; }
+    const baseURL = visionModelBaseUrlInput?.value?.trim() || "";
+    const model = visionModelNameInput?.value?.trim() || "";
+    if (!baseURL) { showFeedback(visionModelFeedback, "端点不能为空", true); return; }
+    if (!/^https?:\/\//i.test(baseURL)) { showFeedback(visionModelFeedback, "端点需以 http:// 或 https:// 开头", true); return; }
+    if (!model) { showFeedback(visionModelFeedback, "模型名称不能为空", true); return; }
+    if (!apiKey && !visionModelConfigured) { showFeedback(visionModelFeedback, "API Key 不能为空", true); return; }
     saveVisionModelBtn.disabled = true;
     try {
       const res = await fetch(`${API}/settings/vision-model`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey }),
+        body: JSON.stringify({ apiKey, baseURL, model }),
       });
       const data = await res.json();
       if (data.ok) {
         showFeedback(visionModelFeedback, "已保存");
+        visionModelConfigured = Boolean(data.vision?.configured);
         if (visionModelKeyInput) visionModelKeyInput.value = "";
         loadSettings();
       } else {

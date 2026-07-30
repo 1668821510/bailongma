@@ -6,8 +6,6 @@ if (process.platform === 'win32') {
 }
 
 const { app, BrowserWindow, shell, dialog, Menu, ipcMain, Tray, nativeImage } = require('electron')
-app.disableHardwareAcceleration()
-app.commandLine.appendSwitch('disable-gpu')
 
 const path = require('path')
 const fs = require('fs')

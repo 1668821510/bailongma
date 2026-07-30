@@ -171,6 +171,7 @@ const createSettingsModal = () => `
       <nav class="settings-nav">
         <button class="settings-nav-item active" data-tab="appearance" type="button">外观</button>
         <button class="settings-nav-item" data-tab="llm" type="button">LLM 模型</button>
+        <button class="settings-nav-item" data-tab="vision-model" type="button">识图模型</button>
         <button class="settings-nav-item" data-tab="media" type="button">媒体能力</button>
         <button class="settings-nav-item" data-tab="social" type="button">社交媒体</button>
         <button class="settings-nav-item" data-tab="voice" type="button">语音识别</button>
@@ -260,6 +261,37 @@ const createSettingsModal = () => `
           </div>
         </div>
 
+        <!-- ── 识图模型 tab ── -->
+        <div class="settings-tab" data-tab="vision-model">
+          <div class="settings-section">
+            <div class="settings-section-label">当前状态</div>
+            <div class="settings-config-row">
+              <span class="settings-config-type">识图模型</span>
+              <span class="settings-config-info" id="settings-cfg-vision">—</span>
+              <span class="settings-config-dot" id="settings-cfg-vision-dot"></span>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">识图模型</div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-vision-model-baseurl">自定义端点</label>
+              <input class="settings-input" id="settings-vision-model-baseurl" type="url" placeholder="https://api.openai.com/v1" autocomplete="off">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-vision-model-name">模型名称</label>
+              <input class="settings-input" id="settings-vision-model-name" type="text" placeholder="gpt-4o-mini" autocomplete="off">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-vision-model-key">API Key</label>
+              <input class="settings-input" id="settings-vision-model-key" type="password" placeholder="留空保持现有 Key" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="settings-section settings-section-action">
+            <button class="settings-save-btn" id="settings-save-vision-model" type="button">保存</button>
+            <span class="settings-feedback" id="settings-vision-model-feedback"></span>
+          </div>
+        </div>
+
         <!-- ── 媒体能力 tab ── -->
         <div class="settings-tab" data-tab="media">
           <div class="settings-section">
@@ -279,17 +311,6 @@ const createSettingsModal = () => `
             <div class="settings-row-action">
               <button class="settings-save-btn" id="settings-save-minimax" type="button">保存</button>
               <span class="settings-feedback" id="settings-minimax-feedback"></span>
-            </div>
-          </div>
-          <div class="settings-section">
-            <div class="settings-section-label">识图大模型 Key</div>
-            <div class="settings-row">
-              <label class="settings-label" for="settings-vision-model-key">API Key</label>
-              <input class="settings-input" id="settings-vision-model-key" type="password" placeholder="请输入识图大模型 Key" autocomplete="new-password">
-            </div>
-            <div class="settings-row-action">
-              <button class="settings-save-btn" id="settings-save-vision-model" type="button">保存</button>
-              <span class="settings-feedback" id="settings-vision-model-feedback"></span>
             </div>
           </div>
         </div>
@@ -558,6 +579,16 @@ const createSettingsModal = () => `
 
         <!-- ── 上网搜索 tab ── -->
         <div class="settings-tab" data-tab="web-search">
+          <div class="settings-section">
+            <div class="settings-section-label">Kimi 原生联网</div>
+            <div class="settings-row">
+              <label class="settings-label" for="websearch-kimi-native">联网搜索</label>
+              <label class="settings-toggle">
+                <input id="websearch-kimi-native" type="checkbox">
+                <span class="settings-toggle-track"></span>
+              </label>
+            </div>
+          </div>
           <div class="settings-section">
             <div class="settings-section-label">搜索引擎</div>
             <p class="settings-hint">Agent 调用 web_search 时分两梯队：第一梯队（带 key 的 API：Serper → Brave → Tavily → SearXNG）按优先级尝试；都没结果时，第二梯队（Bing / Jina / DuckDuckGo，无需配置）并行兜底。配任意一个 key 都能显著提升质量和稳定性，多配几个可避免单一额度用尽时搜索失败。</p>

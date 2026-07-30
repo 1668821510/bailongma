@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { config } from './config.js'
+import { config, getWebSearchConfig } from './config.js'
 import { executeTool } from './capabilities/executor.js'
 import { getToolSchemas } from './capabilities/schemas.js'
 import { recordUsage, shouldThrottle } from './quota.js'
@@ -62,7 +62,9 @@ function boundedText(value, max = NATIVE_SEARCH_MAX_TEXT) {
 }
 
 function nativeSearchUrl(value) {
-  const url = String(value?.url || value?.link || value?.href || value?.uri || '').trim()
+  const nested = value?.url_citation || value?.citation || value?.source || {}
+  const url = String(value?.url || value?.link || value?.href || value?.uri
+    || nested?.url || nested?.link || nested?.href || nested?.uri || '').trim()
   return /^https?:\/\//i.test(url) ? url : ''
 }
 
@@ -74,13 +76,16 @@ function normalizeNativeSearchItems(value) {
       return url ? { url } : null
     }
     if (!item || typeof item !== 'object') return null
+    const detail = item.url_citation || item.citation || item.source || item
     const url = nativeSearchUrl(item)
     if (!url) return null
     return {
-      title: boundedText(item.title || item.name),
+      title: boundedText(item.title || item.name || detail.title || detail.name),
       url,
-      snippet: boundedText(item.snippet || item.summary || item.description),
-      content: boundedText(item.content || item.text || item.body),
+      snippet: boundedText(item.snippet || item.summary || item.description
+        || detail.snippet || detail.summary || detail.description),
+      content: boundedText(item.content || item.text || item.body
+        || detail.content || detail.text || detail.body),
     }
   }).filter(Boolean)
 }
@@ -165,6 +170,16 @@ function buildNativeSearchContextMessage(searchResults) {
   return `Native web search results are available. Use them as factual context and continue the current task.\n${JSON.stringify(searchResults)}`
 }
 
+function extractContentText(content) {
+  if (typeof content === 'string') return content
+  const parts = Array.isArray(content) ? content : (content ? [content] : [])
+  return parts.map(part => {
+    if (typeof part === 'string') return part
+    if (!part || typeof part !== 'object') return ''
+    return String(part.text?.value || part.text || part.content || part.output_text || '')
+  }).join('')
+}
+
 export const __nativeSearchInternals = {
   isKimiNativeSearchCall,
   isGenericNativeSearchCall,
@@ -199,6 +214,9 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
     requestParams.tools = toolSchemas
     requestParams.tool_choice = 'auto'
   }
+  if (config.provider === 'moonshot') {
+    requestParams.enable_search = getWebSearchConfig().kimiNativeSearchEnabled
+  }
 
   const stream = await getClient().chat.completions.create(requestParams, { signal })
 
@@ -230,6 +248,13 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
       && toolCallsMap[delta.index ?? 0]?.type === 'builtin_function'
       && toolCallsMap[delta.index ?? 0]?.name === '$web_search'
     const deltaToolCalls = Array.isArray(delta?.tool_calls) ? [...delta.tool_calls] : []
+    for (const tools of [delta?.tools, choice?.tools, chunk?.tools]) {
+      const nativeTools = Array.isArray(tools) ? tools : (tools ? [tools] : [])
+      for (const tool of nativeTools) {
+        if (!isKimiNativeSearchCall(tool) && !isGenericNativeSearchCall(tool)) continue
+        deltaToolCalls.push({ ...tool, index: tool.index ?? deltaToolCalls.length })
+      }
+    }
     if (isKimiNativeSearchCall(delta) || directNativeContinuation) {
       deltaToolCalls.push({ ...delta, index: delta.index ?? 0 })
     }
@@ -249,7 +274,9 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
         if (tc.type) toolCallsMap[idx].type = tc.type
         if (tc.function?.name) {
           const wasEmpty = toolCallsMap[idx].name === ''
-          toolCallsMap[idx].name += tc.function.name
+          if (!toolCallsMap[idx].name.endsWith(tc.function.name)) {
+            toolCallsMap[idx].name += tc.function.name
+          }
           // 第一次拿到完整 name 时通知上层 —— 此时流文本已 end，但工具尚未执行，
           // 没有这个信号 UI 会出现"思考动画停止 → 工具行出现"之间的死寂。
           if (wasEmpty && toolCallsMap[idx].name) {
@@ -274,7 +301,7 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
     }
 
     // 文本增量
-    const text = delta?.content
+    const text = extractContentText(delta?.content)
     if (!text) continue
 
     // DeepSeek：思考流结束、进入正式回答时，先关闭 think 流

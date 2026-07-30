@@ -17,6 +17,8 @@ export const DEFAULT_QWEN_MODEL = 'qwen-turbo'
 export const DEFAULT_MOONSHOT_MODEL = 'moonshot-v1-8k'
 export const DEFAULT_ZHIPU_MODEL = 'glm-4-flash'
 export const DEFAULT_MIMO_MODEL = 'mimo-v2.5'
+export const DEFAULT_VISION_MODEL = 'gpt-4o-mini'
+export const DEFAULT_VISION_BASE_URL = 'https://api.openai.com/v1'
 
 export const DEEPSEEK_MODELS = [
   {
@@ -81,6 +83,11 @@ export const QWEN_MODELS = [
 ]
 
 export const MOONSHOT_MODELS = [
+  {
+    id: 'kimi-k3',
+    label: 'Kimi K3',
+    deprecated: false,
+  },
   {
     id: 'moonshot-v1-8k',
     label: 'moonshot-v1-8k',
@@ -358,7 +365,11 @@ export const config = {
   baseURL: null,
   needsActivation: true,
   temperature: 0.5,
-  visionModelKey: null,
+  visionModel: {
+    apiKey: '',
+    baseURL: DEFAULT_VISION_BASE_URL,
+    model: DEFAULT_VISION_MODEL,
+  },
   security: {
     fileSandbox: true,
     execSandbox: true,
@@ -384,8 +395,14 @@ if (stored) {
   if (fromEnv) applyConfig(fromEnv.provider, fromEnv.apiKey, fromEnv.model)
 }
 
-if (stored && typeof stored.vision_model_key === 'string' && stored.vision_model_key.trim()) {
-  config.visionModelKey = stored.vision_model_key.trim()
+const storedVisionConfig = readExistingStoredConfig()
+const storedVisionModel = storedVisionConfig.vision_model && typeof storedVisionConfig.vision_model === 'object'
+  ? storedVisionConfig.vision_model
+  : {}
+config.visionModel = {
+  apiKey: String(storedVisionModel.apiKey || storedVisionConfig.vision_model_key || '').trim(),
+  baseURL: String(storedVisionModel.baseURL || DEFAULT_VISION_BASE_URL).trim(),
+  model: String(storedVisionModel.model || DEFAULT_VISION_MODEL).trim(),
 }
 
 // At startup, copy social credentials from the config file into process.env so connectors can read them
@@ -544,7 +561,11 @@ export function deactivate() {
   config.apiKey = null
   config.baseURL = null
   config.needsActivation = true
-  config.visionModelKey = null
+  config.visionModel = {
+    apiKey: '',
+    baseURL: DEFAULT_VISION_BASE_URL,
+    model: DEFAULT_VISION_MODEL,
+  }
 }
 
 export function switchModel(model) {
@@ -626,19 +647,44 @@ export function setMinimaxKey(key) {
 }
 
 export function getVisionModelKey() {
-  return config.visionModelKey || null
+  return config.visionModel.apiKey || null
+}
+
+export function getVisionModelConfig() {
+  return {
+    configured: Boolean(config.visionModel.apiKey && config.visionModel.baseURL && config.visionModel.model),
+    baseURL: config.visionModel.baseURL,
+    model: config.visionModel.model,
+  }
+}
+
+export function getVisionModelCredentials() {
+  return { ...config.visionModel }
+}
+
+export function setVisionModelConfig({ apiKey, baseURL, model } = {}) {
+  const nextApiKey = apiKey === undefined || String(apiKey).trim() === ''
+    ? config.visionModel.apiKey
+    : String(apiKey).trim()
+  const nextBaseURL = String(baseURL ?? config.visionModel.baseURL).trim().replace(/\/+$/, '')
+  const nextModel = String(model ?? config.visionModel.model).trim()
+
+  if (!nextApiKey) throw new Error('Vision model API key cannot be empty')
+  if (!nextBaseURL) throw new Error('Vision model endpoint cannot be empty')
+  if (!/^https?:\/\//i.test(nextBaseURL)) {
+    throw new Error('Vision model endpoint must start with http:// or https://')
+  }
+  if (!nextModel) throw new Error('Vision model name cannot be empty')
+
+  const existing = readExistingStoredConfig()
+  const { vision_model_key: _legacyVisionKey, ...rest } = existing
+  config.visionModel = { apiKey: nextApiKey, baseURL: nextBaseURL, model: nextModel }
+  writeStoredConfig({ ...rest, vision_model: { ...config.visionModel } })
+  return getVisionModelConfig()
 }
 
 export function setVisionModelKey(key) {
-  if (typeof key !== 'string' || !key.trim()) {
-    throw new Error('Vision model key cannot be empty')
-  }
-  const trimmed = key.trim()
-  let existing = {}
-  try { existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8')) } catch {}
-  config.visionModelKey = trimmed
-  writeStoredConfig({ ...existing, vision_model_key: trimmed })
-  return { configured: true }
+  return setVisionModelConfig({ apiKey: key })
 }
 
 // ── Seedance AI 视频生成（火山方舟 Ark）配置 ──
@@ -1021,9 +1067,17 @@ function readWebSearchBlock() {
       jinaKey:    typeof raw.jina_api_key   === 'string' ? raw.jina_api_key   : '',
       braveKey:   typeof raw.brave_api_key  === 'string' ? raw.brave_api_key  : '',
       tavilyKey:  typeof raw.tavily_api_key === 'string' ? raw.tavily_api_key : '',
+      kimiNativeSearchEnabled: raw.kimi_native_search_enabled === true,
     }
   } catch {
-    return { serperKey: '', searxngUrl: '', jinaKey: '', braveKey: '', tavilyKey: '' }
+    return {
+      serperKey: '',
+      searxngUrl: '',
+      jinaKey: '',
+      braveKey: '',
+      tavilyKey: '',
+      kimiNativeSearchEnabled: false,
+    }
   }
 }
 
@@ -1042,6 +1096,7 @@ export function getWebSearchConfig() {
     jinaConfigured:   !!(stored.jinaKey    || envJina),
     braveConfigured:  !!(stored.braveKey   || envBrave),
     tavilyConfigured: !!(stored.tavilyKey  || envTavily),
+    kimiNativeSearchEnabled: stored.kimiNativeSearchEnabled,
     // 输入框只回显 stored 值，避免用户以为能编辑 env 值
     searxngUrl:       stored.searxngUrl,
     // effective URL（含 env 兜底），UI 可显示在状态行
@@ -1071,6 +1126,10 @@ export function setWebSearchConfig(updates) {
   try { existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8')) } catch {}
   const next = { ...existing }
   for (const [key, val] of Object.entries(updates || {})) {
+    if (key === 'kimiNativeSearchEnabled') {
+      next.kimi_native_search_enabled = val === true
+      continue
+    }
     const cfgField = WEB_SEARCH_KEY_MAP[key]
     if (!cfgField) continue
     const trimmed = String(val || '').trim()
