@@ -247,18 +247,18 @@ function setupTray() {
     },
     { type: 'separator' },
     {
-      
-    {
       label: '3D 意识空间',
       click: () => {
         if (mainWindow) {
-          mainWindow.loadURL(`http://127.0.0.1:`+port+`/consciousness-3d`)
+          mainWindow.loadURL(`http://127.0.0.1:${backendPort}/consciousness-3d`)
           mainWindow.show()
           mainWindow.focus()
         }
       },
     },
-    { type: 'separator' },    label: '退出',
+    { type: 'separator' },
+    {
+      label: '退出',
       click: () => {
         app.isQuiting = true
         app.quit()
@@ -474,7 +474,7 @@ app.whenReady().then(async () => {
 
   ipcMain.on('open-consciousness-3d', () => {
     if (mainWindow) {
-      mainWindow.loadURL(`http://127.0.0.1:`+port+`/consciousness-3d`)
+      mainWindow.loadURL(`http://127.0.0.1:${backendPort}/consciousness-3d`)
     }
   })
 
