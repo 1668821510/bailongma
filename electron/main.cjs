@@ -148,8 +148,15 @@ function waitForBackend(port, timeoutMs = 30000) {
       }
 
       const req = http.get(url, res => {
-        res.resume()
-        resolve()
+        const chunks = []
+        res.on('data', chunk => chunks.push(chunk))
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')))
+          } catch {
+            resolve({ activated: false })
+          }
+        })
       })
       req.on('error', () => setTimeout(tick, 300))
       req.setTimeout(1500, () => {
@@ -162,7 +169,7 @@ function waitForBackend(port, timeoutMs = 30000) {
   })
 }
 
-async function createWindow() {
+async function createWindow(isActivated = false) {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -222,8 +229,14 @@ async function createWindow() {
   })
 
   const activationPath = path.join(__dirname, '../activation.html')
-  await mainWindow.loadFile(activationPath, {
-    query: { apiBase: `http://127.0.0.1:${backendPort}` },
+  const brainUiPath = path.join(__dirname, '../brain-ui.html')
+  const apiBase = `http://127.0.0.1:${backendPort}`
+  const pagePath = isActivated ? brainUiPath : activationPath
+  await mainWindow.loadFile(pagePath, {
+    query: {
+      apiBase,
+      brainUiUrl: pathToFileURL(brainUiPath).href,
+    },
   })
   // 关闭主窗口时最小化到托盘，不退出
   mainWindow.on('close', (e) => {
@@ -488,17 +501,18 @@ app.whenReady().then(async () => {
 
   Menu.setApplicationMenu(null)
 
+  let activationStatus
   try {
     backendPort = await findFreePort(3721)
     await bootstrapBackend(backendPort)
-    await waitForBackend(backendPort)
+    activationStatus = await waitForBackend(backendPort)
   } catch (err) {
     dialog.showErrorBox('Startup failed', `Unable to start the Bailongma backend:\n${err.message}`)
     app.quit()
     return
   }
 
-  await createWindow()
+  await createWindow(Boolean(activationStatus?.activated))
   setupTray()
   setupAutoUpdater()
   // 不再注册任何系统级 globalShortcut；F11 / F12 / Ctrl+R 已由 mainWindow

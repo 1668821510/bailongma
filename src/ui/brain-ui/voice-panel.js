@@ -4,6 +4,8 @@
 // 点云算法移植自 ACUI (Remix)/Voice Component.html
 
 // ─── 球面采样（Fibonacci） ───
+import { API } from './api-client.js';
+
 function fibSphere(n, radius) {
   const pts = [];
   const golden = Math.PI * (3 - Math.sqrt(5));
@@ -81,7 +83,7 @@ const SOUND_EVENT_ICONS = {
   knock_door:      '🚪',
 };
 
-const CLOUD_WS_URL  = 'ws://127.0.0.1:3721/voice/cloud';
+const CLOUD_WS_URL  = `${API.replace(/^http/, 'ws')}/voice/cloud`;
 const VOICE_THRESHOLD_KEY = 'bailongma-voice-threshold';
 const VOICE_PROVIDER_KEY = 'bailongma-voice-provider';
 

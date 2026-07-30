@@ -339,7 +339,17 @@
 
   <script>
     const API_BASE = new URLSearchParams(window.location.search).get('apiBase') || ''
+    const BRAIN_UI_URL = new URLSearchParams(window.location.search).get('brainUiUrl') || ''
     const apiUrl = pathname => `${API_BASE}${pathname}`
+    function openBrainUi() {
+      if (!BRAIN_UI_URL) {
+        window.location.replace(apiUrl('/brain-ui'))
+        return
+      }
+      const target = new URL(BRAIN_UI_URL)
+      target.searchParams.set('apiBase', API_BASE)
+      window.location.replace(target.href)
+    }
     const ACTIVATION_WARMUP_KEY = 'bailongma_activation_warmup_until'
     const ACTIVATION_WARMUP_MS = 2500
 
@@ -363,7 +373,7 @@
 
     fetch(apiUrl('/activation-status'))
       .then(r => r.json())
-      .then(data => { if (data.activated) window.location.replace(apiUrl('/brain-ui')) })
+      .then(data => { if (data.activated) openBrainUi() })
       .catch(() => {})
 
     function setStatus(text, kind) {
@@ -677,7 +687,7 @@
         const voiceNote = [sttCfg && '语音识别', ttsCfg && '语音合成'].filter(Boolean)
         const suffix = voiceNote.length ? `，已保存 ${voiceNote.join('+')} 配置` : ''
         setStatus(`激活成功：${data.provider} · ${data.model}${suffix}`, 'ok')
-        setTimeout(() => window.location.replace(apiUrl('/brain-ui')), 350)
+        setTimeout(openBrainUi, 350)
       } catch (err) {
         setStatus('网络错误：' + err.message, 'err')
         syncButtonState()
@@ -747,7 +757,7 @@
           return
         }
         setCustomStatus(`激活成功：${data.model}`, 'ok')
-        setTimeout(() => window.location.replace(apiUrl('/brain-ui')), 700)
+        setTimeout(openBrainUi, 700)
       } catch (err) {
         setCustomStatus('网络错误：' + err.message, 'err')
         syncCustomButtonState()
@@ -763,4 +773,3 @@
   </script>
 </body>
 </html>
-
