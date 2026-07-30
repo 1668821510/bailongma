@@ -358,6 +358,7 @@ export const config = {
   baseURL: null,
   needsActivation: true,
   temperature: 0.5,
+  visionModelKey: null,
   security: {
     fileSandbox: true,
     execSandbox: true,
@@ -381,6 +382,10 @@ if (stored) {
 } else if (shouldAllowEnvFallback()) {
   const fromEnv = loadFromEnv()
   if (fromEnv) applyConfig(fromEnv.provider, fromEnv.apiKey, fromEnv.model)
+}
+
+if (stored && typeof stored.vision_model_key === 'string' && stored.vision_model_key.trim()) {
+  config.visionModelKey = stored.vision_model_key.trim()
 }
 
 // At startup, copy social credentials from the config file into process.env so connectors can read them
@@ -539,6 +544,7 @@ export function deactivate() {
   config.apiKey = null
   config.baseURL = null
   config.needsActivation = true
+  config.visionModelKey = null
 }
 
 export function switchModel(model) {
@@ -617,6 +623,22 @@ export function setMinimaxKey(key) {
     const { minimax_api_key: _removed, ...rest } = existing
     writeStoredConfig(rest)
   }
+}
+
+export function getVisionModelKey() {
+  return config.visionModelKey || null
+}
+
+export function setVisionModelKey(key) {
+  if (typeof key !== 'string' || !key.trim()) {
+    throw new Error('Vision model key cannot be empty')
+  }
+  const trimmed = key.trim()
+  let existing = {}
+  try { existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8')) } catch {}
+  config.visionModelKey = trimmed
+  writeStoredConfig({ ...existing, vision_model_key: trimmed })
+  return { configured: true }
 }
 
 // ── Seedance AI 视频生成（火山方舟 Ark）配置 ──
@@ -1059,72 +1081,6 @@ export function setWebSearchConfig(updates) {
     else delete next[cfgField]
   }
   writeStoredConfig(next)
-}
-
-// ── 全局联网搜索总开关 ──────────────────────────────────────────────────────
-// 存储在 config.json 的 web_search_enabled 字段，控制 LLM 请求是否携带搜索参数。
-const WEB_SEARCH_ENABLED_KEY = 'web_search_enabled'
-
-export function getWebSearchEnabled() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))
-    return raw[WEB_SEARCH_ENABLED_KEY] !== false  // 默认开启
-  } catch {
-    return true
-  }
-}
-
-export function setWebSearchEnabled(enabled) {
-  let existing = {}
-  try { existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8')) } catch {}
-  writeStoredConfig({ ...existing, [WEB_SEARCH_ENABLED_KEY]: !!enabled })
-}
-
-// ── 识图大模型配置 ────────────────────────────────────────────────────────────
-// 与对话 LLM 完全独立，存储在 config.json 的 "vision" 块。
-// 字段：baseURL / apiKey / model
-const VISION_CONFIG_KEYS = ['baseURL', 'apiKey', 'model']
-
-function readVisionBlock() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8'))
-    if (raw?.vision && typeof raw.vision === 'object') return raw.vision
-  } catch {}
-  return {}
-}
-
-// 前端可见视图：不暴露 apiKey 明文
-export function getVisionConfig() {
-  const stored = readVisionBlock()
-  return {
-    baseURL:  typeof stored.baseURL === 'string' ? stored.baseURL : '',
-    model:    typeof stored.model === 'string'   ? stored.model   : '',
-    configured: !!(stored.apiKey && stored.baseURL && stored.model),
-  }
-}
-
-// Backend-only：读明文 apiKey
-export function getVisionCredentials() {
-  const stored = readVisionBlock()
-  return {
-    baseURL: typeof stored.baseURL === 'string' ? stored.baseURL : '',
-    apiKey:  typeof stored.apiKey === 'string'  ? stored.apiKey  : '',
-    model:   typeof stored.model === 'string'   ? stored.model   : '',
-  }
-}
-
-export function setVisionConfig(updates) {
-  let existing = {}
-  try { existing = JSON.parse(fs.readFileSync(paths.configFile, 'utf-8')) } catch {}
-  const current = existing.vision || {}
-  const next = { ...current }
-  for (const [key, val] of Object.entries(updates || {})) {
-    if (!VISION_CONFIG_KEYS.includes(key)) continue
-    const trimmed = String(val || '').trim()
-    if (trimmed) next[key] = trimmed
-    else delete next[key]
-  }
-  writeStoredConfig({ ...existing, vision: next })
 }
 
 export const __internals = {

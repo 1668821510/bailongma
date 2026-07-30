@@ -212,6 +212,7 @@ const state = {
   thoughtStack: [],  // thought stack, max 3 entries, format: { concept, line }
   startupSelfCheck: null,
   pendingConfidenceHint: null,  // 上一轮 refresh-loop 的 confidence，供下次 runInjector 调整召回数量后清空
+  pendingSearchResults: null,    // 上一轮原生联网搜索结果，下一轮由 injector 一次性消费
   tickCounter: 0,             // 累计 TICK 计数（每次进 isTick 路径自增）
   lastTaskRefreshTick: -10,   // 上次 TICK 路径触发 refresh-loop 时的 tickCounter；初值 -10 保证首个 TICK 立刻可触发（差值 = 0 - (-10) = 10 >= 5）
   focusStack: loadFocusStack(),  // 动态上下文记忆池第 3b/5c 步：注意力焦点栈（栈底 → 栈顶），重启从 db 恢复
@@ -890,6 +891,7 @@ async function runTurn(input, label, msg = null) {
       task: state.task,
       taskKnowledge: taskKnowledgeText,
       memories: memoriesText,
+      nativeSearchResults: injection.nativeSearchResults,
       fastUserPath,
       signal: controller.signal,
     })
@@ -1191,6 +1193,7 @@ async function runTurn(input, label, msg = null) {
 
   // Store tool result for injection on the next TICK
   state.lastToolResult = llmResult.toolResult || null
+  state.pendingSearchResults = llmResult.nativeSearchResults || null
 
   console.log('\nJarvis:', response)
   finishTurn(response)

@@ -171,7 +171,6 @@ const createSettingsModal = () => `
       <nav class="settings-nav">
         <button class="settings-nav-item active" data-tab="appearance" type="button">外观</button>
         <button class="settings-nav-item" data-tab="llm" type="button">LLM 模型</button>
-        <button class="settings-nav-item" data-tab="vision" type="button">识图大模型</button>
         <button class="settings-nav-item" data-tab="media" type="button">媒体能力</button>
         <button class="settings-nav-item" data-tab="social" type="button">社交媒体</button>
         <button class="settings-nav-item" data-tab="voice" type="button">语音识别</button>
@@ -261,38 +260,6 @@ const createSettingsModal = () => `
           </div>
         </div>
 
-        <!-- ── 识图大模型 tab ── -->
-        <div class="settings-tab" data-tab="vision">
-          <div class="settings-section">
-            <div class="settings-section-label">识图大模型配置</div>
-            <p class="settings-hint">独立配置用于识图的大模型（如 GPT-4o、Qwen-VL 等），与对话模型互相隔离。配置后可在对话中上传图片让 AI 识别。</p>
-            <div class="settings-row">
-              <label class="settings-label" for="settings-vision-baseurl">接口地址</label>
-              <input class="settings-input" id="settings-vision-baseurl" type="text" placeholder="如 https://api.openai.com/v1">
-            </div>
-            <div class="settings-row">
-              <label class="settings-label" for="settings-vision-key">API Key</label>
-              <input class="settings-input" id="settings-vision-key" type="password" placeholder="填入识图模型的 API Key" autocomplete="new-password">
-            </div>
-            <div class="settings-row">
-              <label class="settings-label" for="settings-vision-model">模型名称</label>
-              <input class="settings-input" id="settings-vision-model" type="text" placeholder="如 gpt-4o, qwen-vl-max">
-            </div>
-            <div class="settings-row-action">
-              <button class="settings-save-btn" id="settings-save-vision" type="button">保存</button>
-              <span class="settings-feedback" id="settings-vision-feedback"></span>
-            </div>
-          </div>
-          <div class="settings-section">
-            <div class="settings-section-label">当前状态</div>
-            <div class="settings-config-row">
-              <span class="settings-config-type">识图</span>
-              <span class="settings-config-info" id="settings-cfg-vision">—</span>
-              <span class="settings-config-dot" id="settings-cfg-vision-dot"></span>
-            </div>
-          </div>
-        </div>
-
         <!-- ── 媒体能力 tab ── -->
         <div class="settings-tab" data-tab="media">
           <div class="settings-section">
@@ -312,6 +279,17 @@ const createSettingsModal = () => `
             <div class="settings-row-action">
               <button class="settings-save-btn" id="settings-save-minimax" type="button">保存</button>
               <span class="settings-feedback" id="settings-minimax-feedback"></span>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">识图大模型 Key</div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-vision-model-key">API Key</label>
+              <input class="settings-input" id="settings-vision-model-key" type="password" placeholder="请输入识图大模型 Key" autocomplete="new-password">
+            </div>
+            <div class="settings-row-action">
+              <button class="settings-save-btn" id="settings-save-vision-model" type="button">保存</button>
+              <span class="settings-feedback" id="settings-vision-model-feedback"></span>
             </div>
           </div>
         </div>
@@ -580,21 +558,6 @@ const createSettingsModal = () => `
 
         <!-- ── 上网搜索 tab ── -->
         <div class="settings-tab" data-tab="web-search">
-          <div class="settings-section">
-            <div class="settings-section-label">全局联网搜索开关</div>
-            <p class="settings-hint">开启后，支持联网搜索的大模型（如 DeepSeek V4 Pro）在对话时将自动携带搜索参数，实时检索互联网信息。关闭后所有模型均不附加搜索参数。</p>
-            <div class="settings-row">
-              <label class="settings-label" for="settings-web-search-toggle">启用全局联网搜索</label>
-              <label class="settings-toggle">
-                <input type="checkbox" id="settings-web-search-toggle" checked>
-                <span class="settings-toggle-track"></span>
-              </label>
-            </div>
-            <div class="settings-row-action">
-              <button class="settings-save-btn" id="settings-save-web-search-toggle" type="button">保存</button>
-              <span class="settings-feedback" id="settings-web-search-toggle-feedback"></span>
-            </div>
-          </div>
           <div class="settings-section">
             <div class="settings-section-label">搜索引擎</div>
             <p class="settings-hint">Agent 调用 web_search 时分两梯队：第一梯队（带 key 的 API：Serper → Brave → Tavily → SearXNG）按优先级尝试；都没结果时，第二梯队（Bing / Jina / DuckDuckGo，无需配置）并行兜底。配任意一个 key 都能显著提升质量和稳定性，多配几个可避免单一额度用尽时搜索失败。</p>

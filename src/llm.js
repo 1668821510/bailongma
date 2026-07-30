@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { config, getWebSearchEnabled } from './config.js'
+import { config } from './config.js'
 import { executeTool } from './capabilities/executor.js'
 import { getToolSchemas } from './capabilities/schemas.js'
 import { recordUsage, shouldThrottle } from './quota.js'
@@ -28,15 +28,150 @@ function shouldEnableDeepSeekThinking(thinking) {
   return true
 }
 
-// 判断当前模型是否支持原生联网搜索能力
-function modelSupportsNativeSearch(provider, model) {
-  // DeepSeek v4 系列支持 search 参数
-  if (provider === 'deepseek' && /^deepseek-v4/i.test(model || '')) return true
-  // 未来可在这里扩展其他提供商的搜索支持
-  return false
+// 单次流式调用，返回 { content, toolCalls, aborted }
+const NATIVE_SEARCH_MAX_RESULTS = 12
+const NATIVE_SEARCH_MAX_CITATIONS = 24
+const NATIVE_SEARCH_MAX_TEXT = 4000
+
+function isKimiNativeSearchCall(value) {
+  const type = String(value?.type || '').trim().toLowerCase()
+  const name = String(value?.function?.name || value?.name || '').trim()
+  return type === 'builtin_function' && name === '$web_search'
 }
 
-// 单次流式调用，返回 { content, toolCalls, aborted }
+function isGenericNativeSearchCall(value) {
+  const name = String(value?.function?.name || value?.name || '').trim().toLowerCase()
+  if (!name) return false
+  if (name === '$web_search' || name === 'web_search_preview' || name === 'web.run') return true
+  const embedded = parseNativeSearchJson(value?.function?.arguments || value?.arguments || value?.result || value?.output)
+  return (name === 'web_search' || name === 'search')
+    && !!(value?.results || value?.search_results || value?.citations || value?.annotations || value?.result || embedded)
+}
+
+function parseNativeSearchJson(value) {
+  if (value && typeof value === 'object') return value
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  if (!text) return null
+  try { return JSON.parse(text) } catch { return null }
+}
+
+function boundedText(value, max = NATIVE_SEARCH_MAX_TEXT) {
+  const text = String(value ?? '').trim()
+  return text ? text.slice(0, max) : ''
+}
+
+function nativeSearchUrl(value) {
+  const url = String(value?.url || value?.link || value?.href || value?.uri || '').trim()
+  return /^https?:\/\//i.test(url) ? url : ''
+}
+
+function normalizeNativeSearchItems(value) {
+  const items = Array.isArray(value) ? value : (value ? [value] : [])
+  return items.map(item => {
+    if (typeof item === 'string') {
+      const url = nativeSearchUrl({ url: item })
+      return url ? { url } : null
+    }
+    if (!item || typeof item !== 'object') return null
+    const url = nativeSearchUrl(item)
+    if (!url) return null
+    return {
+      title: boundedText(item.title || item.name),
+      url,
+      snippet: boundedText(item.snippet || item.summary || item.description),
+      content: boundedText(item.content || item.text || item.body),
+    }
+  }).filter(Boolean)
+}
+
+function normalizeNativeSearchPayload(value) {
+  const payload = parseNativeSearchJson(value)
+  if (Array.isArray(payload)) {
+    const items = normalizeNativeSearchItems(payload)
+    return items.length ? { query: '', summary: '', results: items, citations: items } : null
+  }
+  if (!payload || typeof payload !== 'object') return null
+
+  const resultItems = normalizeNativeSearchItems(
+    payload.results || payload.search_results || payload.searchResults || payload.web_results || payload.sources || payload.items,
+  )
+  const citationItems = normalizeNativeSearchItems(payload.citations || payload.annotations || payload.references)
+  const directItem = nativeSearchUrl(payload) ? normalizeNativeSearchItems(payload) : []
+  const results = [...resultItems, ...directItem]
+  const citations = [...citationItems, ...results]
+  const summary = boundedText(payload.summary || payload.search_summary || payload.answer || payload.description)
+  const query = boundedText(payload.query || payload.q)
+
+  if (!results.length && !citations.length && !summary) return null
+  return { query, summary, results, citations }
+}
+
+function collectNativeSearchCandidates(value, candidates, depth = 0) {
+  if (!value || depth > 8) return
+  if (Array.isArray(value)) {
+    for (const item of value) collectNativeSearchCandidates(item, candidates, depth + 1)
+    return
+  }
+  if (typeof value !== 'object') return
+
+  if (isKimiNativeSearchCall(value)) {
+    candidates.push(value.function?.arguments || value.arguments || value.result || value.output || value)
+  } else if (isGenericNativeSearchCall(value)) {
+    candidates.push(value.result || value.output || value.function?.arguments || value.arguments || value)
+  }
+
+  for (const key of ['search_results', 'searchResults', 'web_results', 'citations', 'annotations', 'references']) {
+    if (value[key] !== undefined) candidates.push(value[key])
+  }
+
+  for (const nested of Object.values(value)) {
+    if (nested && typeof nested === 'object') {
+      collectNativeSearchCandidates(nested, candidates, depth + 1)
+    }
+  }
+}
+
+function mergeNativeSearchResults(...values) {
+  const merged = { source: 'native', query: '', summary: '', results: [], citations: [] }
+  const seenResults = new Set()
+  const seenCitations = new Set()
+  const summaries = new Set()
+
+  for (const value of values.flat()) {
+    const normalized = value?.results ? value : normalizeNativeSearchPayload(value)
+    if (!normalized) continue
+    if (!merged.query && normalized.query) merged.query = normalized.query
+    if (normalized.summary) summaries.add(normalized.summary)
+    for (const item of normalized.results || []) {
+      if (seenResults.has(item.url)) continue
+      seenResults.add(item.url)
+      merged.results.push(item)
+      if (merged.results.length >= NATIVE_SEARCH_MAX_RESULTS) break
+    }
+    for (const item of normalized.citations || []) {
+      if (seenCitations.has(item.url)) continue
+      seenCitations.add(item.url)
+      merged.citations.push(item)
+      if (merged.citations.length >= NATIVE_SEARCH_MAX_CITATIONS) break
+    }
+  }
+
+  merged.summary = [...summaries].join('\n').slice(0, NATIVE_SEARCH_MAX_TEXT)
+  return merged.results.length || merged.citations.length || merged.summary ? merged : null
+}
+
+function buildNativeSearchContextMessage(searchResults) {
+  return `Native web search results are available. Use them as factual context and continue the current task.\n${JSON.stringify(searchResults)}`
+}
+
+export const __nativeSearchInternals = {
+  isKimiNativeSearchCall,
+  isGenericNativeSearchCall,
+  normalizeNativeSearchPayload,
+  mergeNativeSearchResults,
+}
+
 async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens, thinking = true, signal, onStream }) {
   const requestParams = {
     model: config.model,
@@ -65,17 +200,12 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
     requestParams.tool_choice = 'auto'
   }
 
-  // 全局联网搜索总开关：开关开启 && 当前模型支持原生搜索时，携带搜索参数
-  const webSearchEnabled = getWebSearchEnabled()
-  if (webSearchEnabled && modelSupportsNativeSearch(config.provider, config.model)) {
-    requestParams.search = true
-  }
-
   const stream = await getClient().chat.completions.create(requestParams, { signal })
 
   let fullContent = ''
   let fullReasoningContent = ''
   let toolCallsMap = {}
+  let nativeSearchCandidates = []
   let inThink = false
   let thinkDone = false
   let streamStarted = false
@@ -91,23 +221,32 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
       cacheHitTokens = chunk.usage.prompt_cache_hit_tokens || 0
       cacheMissTokens = chunk.usage.prompt_cache_miss_tokens || 0
     }
+    collectNativeSearchCandidates(chunk, nativeSearchCandidates)
     const choice = chunk.choices?.[0]
     if (!choice) continue
 
     const delta = choice.delta
+    const directNativeContinuation = delta?.function?.arguments
+      && toolCallsMap[delta.index ?? 0]?.type === 'builtin_function'
+      && toolCallsMap[delta.index ?? 0]?.name === '$web_search'
+    const deltaToolCalls = Array.isArray(delta?.tool_calls) ? [...delta.tool_calls] : []
+    if (isKimiNativeSearchCall(delta) || directNativeContinuation) {
+      deltaToolCalls.push({ ...delta, index: delta.index ?? 0 })
+    }
 
     // 工具调用增量
-    if (delta?.tool_calls) {
+    if (deltaToolCalls.length > 0) {
       if (streamStarted) {
         onStream?.({ event: 'end' })
         streamStarted = false
       }
-      for (const tc of delta.tool_calls) {
+      for (const tc of deltaToolCalls) {
         const idx = tc.index ?? 0
         if (!toolCallsMap[idx]) {
-          toolCallsMap[idx] = { id: tc.id || '', name: '', arguments: '' }
+          toolCallsMap[idx] = { id: tc.id || '', type: tc.type || '', name: '', arguments: '' }
         }
         if (tc.id) toolCallsMap[idx].id = tc.id
+        if (tc.type) toolCallsMap[idx].type = tc.type
         if (tc.function?.name) {
           const wasEmpty = toolCallsMap[idx].name === ''
           toolCallsMap[idx].name += tc.function.name
@@ -190,6 +329,10 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
         content: fullContent,
         reasoningContent: fullReasoningContent,
         toolCalls: Object.values(toolCallsMap),
+        nativeSearchResults: mergeNativeSearchResults(
+          nativeSearchCandidates,
+          Object.values(toolCallsMap).filter(isKimiNativeSearchCall).map(tc => tc.arguments),
+        ),
         aborted: true
       }
     }
@@ -212,6 +355,10 @@ async function streamOnce({ messages, toolSchemas, temperature, topP, maxTokens,
     content: fullContent,
     reasoningContent: fullReasoningContent,
     toolCalls: Object.values(toolCallsMap),
+    nativeSearchResults: mergeNativeSearchResults(
+      nativeSearchCandidates,
+      Object.values(toolCallsMap).filter(isKimiNativeSearchCall).map(tc => tc.arguments),
+    ),
     aborted: false
   }
 }
@@ -681,11 +828,12 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
 
   if (shouldThrottle()) {
     console.log('[配额] 用量超过 95%，跳过本次调用')
-    return { content: '（配额接近上限，等待窗口滚动）', toolResult: null, aborted: false, delivered: false }
+    return { content: '（配额接近上限，等待窗口滚动）', toolResult: null, nativeSearchResults: null, aborted: false, delivered: false }
   }
 
   let allContent = ''
   let lastToolResult = null
+  let pendingNativeSearchResults = null
   let sawToolCall = false
   let sentMessage = false
   // delivered 语义：本次 callLLM 调用中是否**真正投递过**至少一条回复给用户。
@@ -722,7 +870,7 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
   for (let round = 0; round < TOOL_LOOP_LIMITS.maxRounds; round++) {
     throwIfAborted(signal)
 
-    const { content, reasoningContent, toolCalls, aborted } = await streamOnceWithRetry({
+    const { content, reasoningContent, toolCalls, nativeSearchResults, aborted } = await streamOnceWithRetry({
       messages,
       toolSchemas,
       temperature,
@@ -752,8 +900,33 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
 
     appendContent(content)
 
+    if (nativeSearchResults) {
+      pendingNativeSearchResults = mergeNativeSearchResults(
+        pendingNativeSearchResults,
+        nativeSearchResults,
+      )
+    }
+
     // 若无 JSON 工具调用，尝试从内容中解析 XML 格式工具调用（MiniMax 备用格式）
     let effectiveToolCalls = toolCalls
+    const nativeSearchCallDetected = toolCalls.some(tc =>
+      isKimiNativeSearchCall(tc) || isGenericNativeSearchCall(tc),
+    )
+    if (nativeSearchCallDetected || nativeSearchResults) {
+      sawToolCall = true
+      effectiveToolCalls = toolCalls.filter(tc =>
+        !isKimiNativeSearchCall(tc) && !isGenericNativeSearchCall(tc),
+      )
+    }
+
+    if (nativeSearchResults && effectiveToolCalls.length === 0 && !content) {
+      messages.push({
+        role: 'user',
+        content: buildNativeSearchContextMessage(nativeSearchResults),
+      })
+      continue
+    }
+
     if (toolCalls.length === 0 && content) {
       const xmlCalls = parseXmlToolCalls(content)
       if (xmlCalls.length > 0) {
@@ -1099,6 +1272,9 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
               : `Tool execution results:\n${resultSummary}\n\nContinue completing the task. If this is a user message and the information is sufficient, call send_message to give the user a final reply. If a tool failed, explain the failure and available clues; do not end silently.`,
         })
       }
+      if (nativeSearchResults) {
+        messages.push({ role: 'user', content: buildNativeSearchContextMessage(nativeSearchResults) })
+      }
     } else {
       const assistantMsg = {
         role: 'assistant',
@@ -1119,6 +1295,9 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
           tool_call_id: tr.id,
           content: String(tr.result)
         })
+      }
+      if (nativeSearchResults) {
+        messages.push({ role: 'user', content: buildNativeSearchContextMessage(nativeSearchResults) })
       }
       if (terminalInternalRound) break
       // "send_message 是不是本轮最后一个动作"才是判断"能不能收尾"的正确信号。
@@ -1191,5 +1370,11 @@ export async function callLLM({ systemPrompt, message, messages: inputMessages =
     }
   }
 
-  return { content: allContent, toolResult: lastToolResult, aborted, delivered }
+  return {
+    content: allContent,
+    toolResult: lastToolResult,
+    nativeSearchResults: pendingNativeSearchResults,
+    aborted,
+    delivered,
+  }
 }

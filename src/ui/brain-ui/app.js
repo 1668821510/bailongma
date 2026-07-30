@@ -48,8 +48,6 @@ let currentUiZoom = DEFAULT_UI_ZOOM;
 let chat = null;
 // 由 initSettings() 内部赋值，供 chat.js 的斜杠命令打开设置面板
 let openSettingsRef = null;
-// 存储最近一次 web_search 结果，用于在聊天中展示搜索来源
-let lastWebSearchResults = null;
 
 function addMsg(...args) { return chat?.addMsg(...args); }
 function openChat(...args) { return chat?.openChat(...args); }
@@ -1263,8 +1261,6 @@ function handle({ type, data = {} }) {
       // Immediately show a "thinking" indicator so the gap between message_received
       // and the first stream_start (injector + LLM TTFT, often 3–30s) doesn't look frozen.
       L1.startThinkingSession();
-      // 新用户消息到来时清空之前的搜索结果缓存
-      lastWebSearchResults = null;
       break;
     }
     case "tick":
@@ -1303,25 +1299,13 @@ function handle({ type, data = {} }) {
     case "tool_call":
       currentStream().tool(data.name, data.args, data.result, data.ok);
       recordAiActivity(data.name);
-      // 记录 web_search 成功结果，用于在聊天中展示搜索来源
-      if (data.name === "web_search" && data.ok) {
-        try {
-          const resultObj = typeof data.result === "string" ? JSON.parse(data.result) : data.result;
-          if (resultObj?.results?.length) {
-            lastWebSearchResults = { query: resultObj.query, source: resultObj.source, results: resultObj.results };
-          }
-        } catch {}
-      }
       break;
     case "response":
       // Round complete — stop all animations
       currentStream().end();
-      // 搜索结果在本轮如果未被消费（无 message 事件），也清空
-      if (lastWebSearchResults) lastWebSearchResults = null;
       break;
     case "processing_preempted":
       currentStream().end();
-      if (lastWebSearchResults) lastWebSearchResults = null;
       break;
     case "llm_retry": {
       currentStream().startThinkingSession();
@@ -1397,19 +1381,8 @@ function handle({ type, data = {} }) {
       if (data.from === "consciousness") {
         lastJarvisContent = data.content;
         const viaLabel = friendlyChannelLabel(data.channel);
-        let displayContent = viaLabel ? `_→ ${viaLabel}_  \n${data.content}` : data.content;
-        // 如果有最近的联网搜索结果，在消息上方添加搜索来源面板
-        if (lastWebSearchResults && lastWebSearchResults.results?.length) {
-          const sources = lastWebSearchResults.results.slice(0, 6);
-          const sourceLines = sources.map((r, i) =>
-            `  ${i + 1}. [${r.title}](${r.url})${r.snippet ? ` — ${r.snippet}` : ""}`
-          ).join("\n");
-          const sourceLabel = lastWebSearchResults.source ? `（来源：${lastWebSearchResults.source}）` : "";
-          const searchHeader = `> **🔍 联网搜索结果** ${sourceLabel}\n> 查询：\`${lastWebSearchResults.query}\`\n>\n${sourceLines.map(s => `> ${s}`).join("\n")}\n\n---\n\n`;
-          displayContent = searchHeader + displayContent;
-          lastWebSearchResults = null; // 消费后清空
-        }
-        addMsg("jarvis", displayContent);
+        const content = viaLabel ? `_→ ${viaLabel}_  \n${data.content}` : data.content;
+        addMsg("jarvis", content);
         enrichVisiblePersonCardFromText(data.content, { source: 'assistant_message' });
         openChat(true);
       }
@@ -1969,6 +1942,9 @@ function initTTSSettings() {
   const minimaxKeyInput = document.getElementById("settings-minimax-key");
   const saveMinimaxBtn  = document.getElementById("settings-save-minimax");
   const minimaxFeedback = document.getElementById("settings-minimax-feedback");
+  const visionModelKeyInput = document.getElementById("settings-vision-model-key");
+  const saveVisionModelBtn  = document.getElementById("settings-save-vision-model");
+  const visionModelFeedback = document.getElementById("settings-vision-model-feedback");
   const saveSocialBtn   = document.getElementById("settings-save-social");
   const socialFeedback  = document.getElementById("settings-social-feedback");
   const saveVoiceBtn    = document.getElementById("settings-save-voice");
@@ -1988,9 +1964,8 @@ function initTTSSettings() {
       const tab = btn.dataset.tab;
       overlay.querySelector(`.settings-tab[data-tab="${tab}"]`)?.classList.add("active");
       if (tab === "social") loadSocialSettings();
-      if (tab === "vision") loadVisionSettings();
       if (tab === "security") loadSecuritySettings();
-      if (tab === "web-search") { loadWebSearchToggleSettings(); loadWebSearchSettings(); }
+      if (tab === "web-search") loadWebSearchSettings();
       if (tab === "update") loadUpdateSettings();
     });
   });
@@ -2002,13 +1977,11 @@ function initTTSSettings() {
     setTimeout(() => { el.textContent = ""; el.className = "settings-feedback"; }, 3000);
   }
 
-  function refreshConfigSummary({ llm, minimax, vision }) {
+  function refreshConfigSummary({ llm, minimax }) {
     const cfgLlm = document.getElementById("settings-cfg-llm");
     const cfgLlmDot = document.getElementById("settings-cfg-llm-dot");
     const cfgMedia = document.getElementById("settings-cfg-media");
     const cfgMediaDot = document.getElementById("settings-cfg-media-dot");
-    const cfgVision = document.getElementById("settings-cfg-vision");
-    const cfgVisionDot = document.getElementById("settings-cfg-vision-dot");
     if (cfgLlm) cfgLlm.textContent = `${llm.provider || "—"} · ${llm.model || "—"}`;
     if (cfgLlmDot) {
       cfgLlmDot.textContent = "●";
@@ -2019,11 +1992,6 @@ function initTTSSettings() {
     if (cfgMediaDot) {
       cfgMediaDot.textContent = "●";
       cfgMediaDot.className = `settings-config-dot ${minimax.configured ? "active" : "inactive"}`;
-    }
-    if (cfgVision) cfgVision.textContent = vision?.configured ? `${vision.model || "—"} · ${vision.baseURL?.replace(/https?:\/\//, "").split("/")[0] || "已配置"}` : "未配置";
-    if (cfgVisionDot) {
-      cfgVisionDot.textContent = "●";
-      cfgVisionDot.className = `settings-config-dot ${vision?.configured ? "active" : "inactive"}`;
     }
   }
 
@@ -2066,9 +2034,9 @@ function initTTSSettings() {
   async function loadSettings() {
     try {
       const data = await fetch(`${API}/settings`).then(r => r.json());
-      const { llm, minimax, providers, vision, webSearchEnabled } = data;
+      const { llm, minimax, providers } = data;
       if (providers) cachedProviders = providers;
-      refreshConfigSummary({ llm, minimax, vision });
+      refreshConfigSummary({ llm, minimax });
       populateProviderSelect(providers, llm.provider || "auto");
       if (providerSelect && llm.provider) providerSelect.value = llm.provider;
       applyCustomProviderUI(llm);
@@ -2077,9 +2045,6 @@ function initTTSSettings() {
         tempSlider.value = String(llm.temperature);
         if (tempVal) tempVal.textContent = llm.temperature.toFixed(2);
       }
-      // 加载全局联网搜索开关状态
-      const toggleEl = document.getElementById("settings-web-search-toggle");
-      if (toggleEl) toggleEl.checked = webSearchEnabled !== false;
     } catch {}
   }
 
@@ -2197,99 +2162,6 @@ function initTTSSettings() {
         showFeedback(webSearchFeedback, "请求失败", true);
       } finally {
         saveWebSearchBtn.disabled = false;
-      }
-    });
-  }
-
-  // ── 全局联网搜索开关 ─────────────────────────────────────────────
-  const saveWebSearchToggleBtn = document.getElementById("settings-save-web-search-toggle");
-  const webSearchToggleFeedback = document.getElementById("settings-web-search-toggle-feedback");
-
-  async function loadWebSearchToggleSettings() {
-    try {
-      const { enabled } = await fetch(`${API}/settings/web-search-toggle`).then(r => r.json());
-      const toggleEl = document.getElementById("settings-web-search-toggle");
-      if (toggleEl) toggleEl.checked = enabled !== false;
-    } catch {}
-  }
-
-  if (saveWebSearchToggleBtn) {
-    saveWebSearchToggleBtn.addEventListener("click", async () => {
-      const toggleEl = document.getElementById("settings-web-search-toggle");
-      const enabled = toggleEl?.checked ?? true;
-      saveWebSearchToggleBtn.disabled = true;
-      try {
-        const res = await fetch(`${API}/settings/web-search-toggle`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          showFeedback(webSearchToggleFeedback, `全局联网搜索已${enabled ? "开启" : "关闭"}`);
-        } else {
-          showFeedback(webSearchToggleFeedback, data.error || "保存失败", true);
-        }
-      } catch {
-        showFeedback(webSearchToggleFeedback, "请求失败", true);
-      } finally {
-        saveWebSearchToggleBtn.disabled = false;
-      }
-    });
-  }
-
-  // ── 识图大模型配置 ───────────────────────────────────────────────
-  const saveVisionBtn = document.getElementById("settings-save-vision");
-  const visionFeedback = document.getElementById("settings-vision-feedback");
-
-  async function loadVisionSettings() {
-    try {
-      const { vision } = await fetch(`${API}/settings/vision`).then(r => r.json());
-      const baseUrlEl = document.getElementById("settings-vision-baseurl");
-      const modelEl = document.getElementById("settings-vision-model");
-      if (baseUrlEl) baseUrlEl.value = vision?.baseURL || "";
-      if (modelEl) modelEl.value = vision?.model || "";
-      const cfgVision = document.getElementById("settings-cfg-vision");
-      const cfgVisionDot = document.getElementById("settings-cfg-vision-dot");
-      if (cfgVision) cfgVision.textContent = vision?.configured ? `${vision.model || "—"}` : "未配置";
-      if (cfgVisionDot) {
-        cfgVisionDot.textContent = "●";
-        cfgVisionDot.className = `settings-config-dot ${vision?.configured ? "active" : "inactive"}`;
-      }
-    } catch {}
-  }
-
-  if (saveVisionBtn) {
-    saveVisionBtn.addEventListener("click", async () => {
-      const baseUrlEl = document.getElementById("settings-vision-baseurl");
-      const keyEl = document.getElementById("settings-vision-key");
-      const modelEl = document.getElementById("settings-vision-model");
-      const baseURL = baseUrlEl?.value?.trim();
-      const apiKey = keyEl?.value?.trim();
-      const model = modelEl?.value?.trim();
-      if (!baseURL || !model) {
-        showFeedback(visionFeedback, "接口地址和模型名称不能为空", true);
-        return;
-      }
-      saveVisionBtn.disabled = true;
-      try {
-        const res = await fetch(`${API}/settings/vision`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ baseURL, apiKey, model }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          showFeedback(visionFeedback, "已保存");
-          if (keyEl) keyEl.value = "";
-          loadVisionSettings();
-        } else {
-          showFeedback(visionFeedback, data.error || "保存失败", true);
-        }
-      } catch {
-        showFeedback(visionFeedback, "请求失败", true);
-      } finally {
-        saveVisionBtn.disabled = false;
       }
     });
   }
@@ -2592,8 +2464,7 @@ function initTTSSettings() {
         t.classList.toggle("active", t.dataset.tab === tab);
       });
       if (tab === "social") loadSocialSettings();
-      if (tab === "vision") loadVisionSettings();
-      if (tab === "web-search") { loadWebSearchToggleSettings(); loadWebSearchSettings(); }
+      if (tab === "web-search") loadWebSearchSettings();
       if (tab === "update") loadUpdateSettings();
     }
   }
@@ -2702,6 +2573,28 @@ function initTTSSettings() {
       }
     } catch { showFeedback(minimaxFeedback, "请求失败", true); }
     finally { saveMinimaxBtn.disabled = false; }
+  });
+
+  saveVisionModelBtn?.addEventListener("click", async () => {
+    const apiKey = visionModelKeyInput?.value?.trim() || "";
+    if (!apiKey) { showFeedback(visionModelFeedback, "Key 不能为空", true); return; }
+    saveVisionModelBtn.disabled = true;
+    try {
+      const res = await fetch(`${API}/settings/vision-model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showFeedback(visionModelFeedback, "已保存");
+        if (visionModelKeyInput) visionModelKeyInput.value = "";
+        loadSettings();
+      } else {
+        showFeedback(visionModelFeedback, data.error || "保存失败", true);
+      }
+    } catch { showFeedback(visionModelFeedback, "请求失败", true); }
+    finally { saveVisionModelBtn.disabled = false; }
   });
 
   const clawbotConnectBtn = document.getElementById("clawbot-connect-btn");

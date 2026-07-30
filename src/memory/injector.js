@@ -54,6 +54,9 @@ export async function runInjector({ message, state, hint = '' }) {
   const lastToolResult = state?.lastToolResult || null
   if (lastToolResult) state.lastToolResult = null
 
+  const nativeSearchResults = state?.pendingSearchResults || null
+  if (state && 'pendingSearchResults' in state) state.pendingSearchResults = null
+
   const confidenceHint = state?.pendingConfidenceHint || null
   if (state && 'pendingConfidenceHint' in state) state.pendingConfidenceHint = null  // 消费即焚
 
@@ -257,5 +260,6 @@ export async function runInjector({ message, state, hint = '' }) {
     temporalRecall,
     selfPerception,
     selfSnapshot,
+    nativeSearchResults,
   }
 }

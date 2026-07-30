@@ -11,7 +11,7 @@ import { getQuotaStatus } from './quota.js'
 import { isRunning, stopLoop, startLoop } from './control.js'
 import { buildHeartbeatSystemPromptPreview } from './system-prompt-preview.js'
 import { paths } from './paths.js'
-import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, getProviderSummaries, getSecurity, setSecurity, getEmbeddingConfig, setEmbeddingConfig, EMBEDDING_PROVIDER_PRESETS, getWebSearchConfig, setWebSearchConfig, getWebSearchEnabled, setWebSearchEnabled, getVisionConfig, setVisionConfig, getVisionCredentials } from './config.js'
+import { config, activate as activateLLM, getActivationStatus, switchModel, setTemperature, getMinimaxKey, setMinimaxKey, getVisionModelKey, setVisionModelKey, getSocialConfig, setSocialConfig, getVoiceConfig, setVoiceConfig, getTTSConfig, setTTSConfig, getTTSCredentials, getProviderSummaries, getSecurity, setSecurity, getEmbeddingConfig, setEmbeddingConfig, EMBEDDING_PROVIDER_PRESETS, getWebSearchConfig, setWebSearchConfig } from './config.js'
 import { streamTTS, TTS_PROVIDERS, TTS_VOICES } from './voice/tts-providers.js'
 import { restartConnector } from './social/index.js'
 // manager.js (Whisper local server) removed
@@ -920,7 +920,7 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
       return
     }
 
-    // GET /settings — return current LLM + MiniMax + vision + webSearchToggle configuration status
+    // GET /settings — return current LLM + MiniMax configuration status
     if (req.method === 'GET' && url.pathname === '/settings') {
       const status = getActivationStatus()
       const minimaxKey = getMinimaxKey()
@@ -937,8 +937,9 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
         minimax: {
           configured: !!(globalThis.process?.env?.MINIMAX_API_KEY || minimaxKey),
         },
-        vision: getVisionConfig(),
-        webSearchEnabled: getWebSearchEnabled(),
+        vision: {
+          configured: !!getVisionModelKey(),
+        },
       })
       return
     }
@@ -1051,6 +1052,22 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
           setMinimaxKey(trimmed)
           replaceProvider(new MinimaxProvider({ apiKey: trimmed }))
           jsonResponse(res, 200, { ok: true, configured: true })
+        } catch (err) {
+          jsonResponse(res, 400, { ok: false, error: err.message })
+        }
+      })
+      return
+    }
+
+    // POST /settings/vision-model — set the vision model API key
+    if (req.method === 'POST' && url.pathname === '/settings/vision-model') {
+      const chunks = []
+      req.on('data', chunk => chunks.push(chunk))
+      req.on('end', () => {
+        try {
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
+          const result = setVisionModelKey(body.apiKey)
+          jsonResponse(res, 200, { ok: true, ...result })
         } catch (err) {
           jsonResponse(res, 400, { ok: false, error: err.message })
         }
@@ -1347,50 +1364,6 @@ export function startAPI(port = 3721, { getStateSnapshot = null, onActivated = n
           const body = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
           setWebSearchConfig(body)
           jsonResponse(res, 200, { ok: true, webSearch: getWebSearchConfig() })
-        } catch (err) {
-          jsonResponse(res, 400, { ok: false, error: err.message })
-        }
-      })
-      return
-    }
-
-    // GET /settings/web-search-toggle — read web search enabled state
-    if (req.method === 'GET' && url.pathname === '/settings/web-search-toggle') {
-      jsonResponse(res, 200, { ok: true, enabled: getWebSearchEnabled() })
-      return
-    }
-
-    // POST /settings/web-search-toggle — save web search enabled state
-    if (req.method === 'POST' && url.pathname === '/settings/web-search-toggle') {
-      const chunks = []
-      req.on('data', chunk => chunks.push(chunk))
-      req.on('end', () => {
-        try {
-          const { enabled } = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
-          setWebSearchEnabled(enabled)
-          jsonResponse(res, 200, { ok: true, enabled: getWebSearchEnabled() })
-        } catch (err) {
-          jsonResponse(res, 400, { ok: false, error: err.message })
-        }
-      })
-      return
-    }
-
-    // GET /settings/vision — read vision configuration status
-    if (req.method === 'GET' && url.pathname === '/settings/vision') {
-      jsonResponse(res, 200, { ok: true, vision: getVisionConfig() })
-      return
-    }
-
-    // POST /settings/vision — save vision configuration
-    if (req.method === 'POST' && url.pathname === '/settings/vision') {
-      const chunks = []
-      req.on('data', chunk => chunks.push(chunk))
-      req.on('end', () => {
-        try {
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8') || '{}')
-          setVisionConfig(body)
-          jsonResponse(res, 200, { ok: true, vision: getVisionConfig() })
         } catch (err) {
           jsonResponse(res, 400, { ok: false, error: err.message })
         }

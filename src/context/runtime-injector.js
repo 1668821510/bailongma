@@ -5,11 +5,36 @@ import { buildPersonCardRuntimeContext, buildPersonCardPanelStateContext } from 
 import { buildWeatherRuntimeContext, getWeatherCardProps } from '../weather.js'
 import { buildDocRuntimeContext, buildDocPanelStateContext, detectDocTopic } from '../docs.js'
 
+function formatNativeSearchResults(searchResults) {
+  if (!searchResults) return ''
+  const sections = []
+  if (searchResults.query) sections.push(`Query: ${searchResults.query}`)
+  if (searchResults.summary) sections.push(`Search summary:\n${searchResults.summary}`)
+
+  const resultLines = (searchResults.results || []).map((item, index) => {
+    const title = item.title || `Result ${index + 1}`
+    const detail = item.snippet || item.content || ''
+    return `${index + 1}. ${title}\nURL: ${item.url}${detail ? `\n${detail}` : ''}`
+  })
+  if (resultLines.length) sections.push(`Web results:\n${resultLines.join('\n')}`)
+
+  const resultUrls = new Set((searchResults.results || []).map(item => item.url))
+  const citationLines = (searchResults.citations || [])
+    .filter(item => item.url && !resultUrls.has(item.url))
+    .map(item => item.url)
+  if (citationLines.length) sections.push(`Citations:\n${citationLines.join('\n')}`)
+
+  return sections.length
+    ? `### Native web search results\n${sections.join('\n\n')}`
+    : ''
+}
+
 export async function runRuntimeInjector({
   message = '',
   task = null,
   taskKnowledge = '',
   memories = '',
+  nativeSearchResults = null,
   fastUserPath = false,
   signal = null,
 } = {}) {
@@ -30,7 +55,7 @@ export async function runRuntimeInjector({
   //     非 weather 消息瞬返 null；weather 消息只触发一次实际抓取。
   //   gatherContext 仍然只在 task && !fastUserPath 时跑（Wave 3 会换启发式）。
   const gatherContextPromise = (task && !fastUserPath)
-    ? gatherContext({ task, taskKnowledge, memories, message: text, signal })
+    ? gatherContext({ task, taskKnowledge, memories, message: text, nativeSearchResults, signal })
     : Promise.resolve([])
 
   const [
@@ -52,6 +77,7 @@ export async function runRuntimeInjector({
   const taskExtraContextText = taskExtraContextItems.length
     ? formatExtraContext(taskExtraContextItems)
     : ''
+  const nativeSearchContextText = formatNativeSearchResults(nativeSearchResults)
 
   const contextParts = [
     keywordContextText,
@@ -63,6 +89,7 @@ export async function runRuntimeInjector({
     docStateText,
     docContextText,
     taskExtraContextText,
+    nativeSearchContextText,
   ].filter(Boolean)
 
   return {
@@ -78,6 +105,7 @@ export async function runRuntimeInjector({
     docContextText,
     taskExtraContextText,
     taskExtraContextItems,
+    nativeSearchContextText,
     contextText: contextParts.join('\n\n'),
   }
 }

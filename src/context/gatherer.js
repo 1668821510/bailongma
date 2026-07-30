@@ -60,14 +60,14 @@ Judgment rules:
  * @param {string} params.message    当前处理的输入（TICK 或消息）
  * @returns {Array} extraContext — 每项 { type, label, content }
  */
-export async function gatherContext({ task, taskKnowledge, memories, message, signal }) {
+export async function gatherContext({ task, taskKnowledge, memories, message, nativeSearchResults = null, signal }) {
   if (!task) return []
 
   const extraContext = []
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     throwIfAborted(signal)
-    const checkResult = await checkSufficiency({ task, taskKnowledge, memories, message, extraContext, signal })
+    const checkResult = await checkSufficiency({ task, taskKnowledge, memories, message, nativeSearchResults, extraContext, signal })
     throwIfAborted(signal)
 
     if (!checkResult || checkResult.sufficient !== false) break
@@ -92,7 +92,7 @@ export async function gatherContext({ task, taskKnowledge, memories, message, si
   return extraContext
 }
 
-async function checkSufficiency({ task, taskKnowledge, memories, message, extraContext, signal }) {
+async function checkSufficiency({ task, taskKnowledge, memories, message, nativeSearchResults, extraContext, signal }) {
   const extraSection = extraContext.length > 0
     ? '\n\nAdditional context already gathered:\n' + extraContext.map(c => `[${c.label}]\n${c.content.slice(0, 500)}`).join('\n')
     : ''
@@ -105,6 +105,9 @@ ${message.slice(0, 300)}
 
 Task knowledge base:
 ${taskKnowledge || '(empty)'}
+
+Native web search results already available:
+${nativeSearchResults ? JSON.stringify(nativeSearchResults).slice(0, 5000) : '(none)'}
 
 Memory summary:
 ${memories || '(empty)'}${extraSection}

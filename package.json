@@ -40,7 +40,6 @@
     "playwright": "^1.59.1"
   },
   "build": {
-    "executableName": "electron",
     "appId": "com.xiaoyuanda.bailongma",
     "productName": "Bailongma",
     "artifactName": "${productName}-Setup-${version}.${ext}",
@@ -104,6 +103,14 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Bailongma"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "xiaoyuanda666-ship-it",
+        "repo": "BaiLongma",
+        "releaseType": "release"
+      }
+    ]
   }
 }

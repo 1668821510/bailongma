@@ -11,6 +11,7 @@ function cloneStateSnapshot(stateSnapshot = {}) {
     task: stateSnapshot.task || null,
     prev_recall: stateSnapshot.prev_recall || null,
     lastToolResult: stateSnapshot.lastToolResult || null,
+    pendingSearchResults: stateSnapshot.pendingSearchResults || null,
     sessionCounter: stateSnapshot.sessionCounter || 0,
     recentActions: Array.isArray(stateSnapshot.recentActions) ? [...stateSnapshot.recentActions] : [],
     thoughtStack: Array.isArray(stateSnapshot.thoughtStack) ? [...stateSnapshot.thoughtStack] : [],
@@ -34,6 +35,7 @@ export async function buildHeartbeatSystemPromptPreview({
     task: workingState.task,
     taskKnowledge: taskKnowledgeText,
     memories: memoriesText,
+    nativeSearchResults: injection.nativeSearchResults,
   })
 
   const persona = getConfig('persona') || ''
@@ -84,6 +86,7 @@ export async function buildHeartbeatSystemPromptPreview({
       memories: injection.memories || [],
       recallMemories: injection.recallMemories || [],
       taskKnowledge: injection.taskKnowledge || [],
+      nativeSearchResults: injection.nativeSearchResults || null,
     },
     stateSnapshot: workingState,
     derived: {
