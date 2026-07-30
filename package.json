@@ -44,7 +44,7 @@
     "productName": "Bailongma",
     "artifactName": "${productName}-Setup-${version}.${ext}",
     "npmRebuild": false,
-    "asar": true,
+    "asar": false,
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**",
       "src/voice/**"

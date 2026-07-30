@@ -6,6 +6,9 @@ if (process.platform === 'win32') {
 }
 
 const { app, BrowserWindow, shell, dialog, Menu, ipcMain, Tray, nativeImage } = require('electron')
+app.disableHardwareAcceleration()
+app.commandLine.appendSwitch('disable-gpu')
+
 const path = require('path')
 const fs = require('fs')
 const net = require('net')
@@ -176,6 +179,8 @@ async function createWindow() {
   })
 
   // 授予麦克风权限（语音输入需要）
+  mainWindow.webContents.openDevTools()
+
   mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
     if (permission === 'media') return callback(true)
     callback(false)
