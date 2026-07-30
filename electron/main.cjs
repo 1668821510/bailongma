@@ -221,7 +221,10 @@ async function createWindow() {
     return { action: 'allow' }
   })
 
-  await mainWindow.loadURL(`http://127.0.0.1:${backendPort}/`)
+  const activationPath = path.join(__dirname, '../activation.html')
+  await mainWindow.loadFile(activationPath, {
+    query: { apiBase: `http://127.0.0.1:${backendPort}` },
+  })
   // 关闭主窗口时最小化到托盘，不退出
   mainWindow.on('close', (e) => {
     if (!app.isQuiting) {

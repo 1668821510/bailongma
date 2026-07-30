@@ -53,6 +53,7 @@
       "electron/**/*",
       "src/**/*",
       "scripts/seed-memories.js",
+      "*.html",
       "index.html",
       "dashboard.html",
       "brain.html",
